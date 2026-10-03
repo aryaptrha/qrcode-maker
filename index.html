@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QR Maker</title>
+  <style>
+    :root { color-scheme: light dark; --fg: #111; --bg: #fafafa; --muted: #888; --line: #ddd; }
+    @media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #121212; --muted: #777; --line: #333; } }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; justify-content: center;
+      font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: var(--fg); background: var(--bg); padding: 48px 16px;
+    }
+    main { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px; }
+    h1 { margin: 0; font-size: 20px; font-weight: 600; }
+    textarea, input[type="text"] {
+      width: 100%; padding: 12px;
+      font: inherit; color: inherit; background: transparent;
+      border: 1px solid var(--line); border-radius: 8px; outline: none;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    textarea:focus, input[type="text"]:focus { border-color: var(--fg); }
+    .preview {
+      aspect-ratio: 1; border: 1px dashed var(--line); border-radius: 8px;
+      display: grid; place-items: center; color: var(--muted); font-size: 14px; text-align: center; padding: 16px;
+    }
+    .preview.has-code { border: none; padding: 0; }
+    canvas { width: 100%; height: auto; border-radius: 8px; image-rendering: pixelated; display: block; }
+    .preview.transparent canvas {
+      background: repeating-conic-gradient(#ccc 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+    }
+    details { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+    summary { cursor: pointer; font-size: 14px; color: var(--muted); user-select: none; }
+    details[open] summary { margin-bottom: 12px; }
+    .option { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; padding: 4px 0; }
+    .option input[type="color"] { width: 40px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+    .option input[type="color"]:disabled { opacity: .3; cursor: default; }
+    .option input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--fg); cursor: pointer; }
+    .option-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; font-size: 13px; }
+    .option select { font: inherit; font-size: 14px; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+    .option input[type="range"] { width: 140px; accent-color: var(--fg); cursor: pointer; }
+    .logo-actions { display: flex; align-items: center; gap: 12px; }
+    .small-btn { padding: 4px 10px; font-size: 13px; border-radius: 6px; }
+    .warning { color: #d97706; }
+    .link { background: none; color: var(--muted); padding: 0; font-size: 13px; font-weight: 400; text-decoration: underline; }
+    #reset { margin-left: auto; }
+    button {
+      padding: 12px; font: inherit; font-weight: 500; cursor: pointer;
+      color: var(--bg); background: var(--fg); border: none; border-radius: 8px;
+    }
+    button:disabled { opacity: .3; cursor: default; }
+    .downloads { display: flex; gap: 12px; }
+    .downloads button { flex: 1; }
+    button.secondary { color: var(--fg); background: transparent; border: 1px solid var(--fg); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>QR Maker</h1>
+    <textarea id="input" placeholder="Type or paste a link or text…" autofocus></textarea>
+    <div id="preview" class="preview">Your QR code will appear here</div>
+    <details>
+      <summary>Customize (optional)</summary>
+      <label class="option">Style
+        <select id="dotStyle">
+          <option value="square">Square</option>
+          <option value="rounded">Rounded</option>
+          <option value="dots">Dots</option>
+        </select>
+      </label>
+      <label class="option">QR color <input id="fgColor" type="color" value="#000000"></label>
+      <label class="option">Background color <input id="bgColor" type="color" value="#ffffff"></label>
+      <label class="option">Transparent background <input id="transparent" type="checkbox"></label>
+      <div class="option">Logo in center
+        <span class="logo-actions">
+          <button id="removeLogo" class="link" type="button" hidden>Remove</button>
+          <button id="chooseLogo" class="small-btn" type="button">Choose image</button>
+        </span>
+        <input id="logoFile" type="file" accept="image/*" hidden>
+      </div>
+      <label class="option" id="logoSizeRow" hidden>Logo size <input id="logoSize" type="range" min="12" max="26" value="20"></label>
+      <div class="option-footer">
+        <span id="warning" class="warning" hidden>Low contrast, may not scan</span>
+        <button id="reset" class="link" type="button">Reset</button>
+      </div>
+    </details>
+    <input id="filename" type="text" placeholder="File name (optional)" spellcheck="false">
+    <div class="downloads">
+      <button id="downloadPng" disabled>Download PNG</button>
+      <button id="downloadSvg" class="secondary" disabled>Download SVG</button>
+    </div>
+  </main>
+
+  <script src="qrcode.js"></script>
+  <script>
+    const input = document.getElementById('input');
+    const preview = document.getElementById('preview');
+    const downloadPngBtn = document.getElementById('downloadPng');
+    const downloadSvgBtn = document.getElementById('downloadSvg');
+    const filenameInput = document.getElementById('filename');
+    const fgColor = document.getElementById('fgColor');
+    const bgColor = document.getElementById('bgColor');
+    const transparent = document.getElementById('transparent');
+    const warning = document.getElementById('warning');
+    const dotStyle = document.getElementById('dotStyle');
+    const logoFile = document.getElementById('logoFile');
+    const logoSize = document.getElementById('logoSize');
+    const logoSizeRow = document.getElementById('logoSizeRow');
+    const removeLogoBtn = document.getElementById('removeLogo');
+    let logo = null;    // loaded HTMLImageElement (with a data: URL src), or null
+    let design = null;  // geometry of the current code, shared by the PNG and SVG output
+    const canvas = document.createElement('canvas');
+
+    qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+
+    const SCALE = 16;  // px per module in the exported PNG
+    const MARGIN = 4;  // quiet zone, in modules
+
+    // WCAG relative luminance of a #rrggbb color
+    function luminance(hex) {
+      const [r, g, b] = [1, 3, 5].map(i => {
+        const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+
+    function updateWarning() {
+      const [a, b] = [luminance(fgColor.value), luminance(bgColor.value)];
+      const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      warning.hidden = transparent.checked || ratio >= 3;
+    }
+
+    function render() {
+      bgColor.disabled = transparent.checked;
+      preview.classList.toggle('transparent', transparent.checked);
+      updateWarning();
+
+      const text = input.value.trim();
+      if (!text) return showMessage('Your QR code will appear here');
+
+      let qr;
+      try {
+        // A logo hides some modules, so use the highest error correction to keep it scannable
+        qr = qrcode(0, logo ? 'H' : 'M');
+        qr.addData(text);
+        qr.make();
+      } catch {
+        return showMessage('Text is too long for a QR code');
+      }
+
+      design = buildDesign(qr);
+      drawCanvas(design);
+
+      preview.classList.add('has-code');
+      preview.replaceChildren(canvas);
+      downloadPngBtn.disabled = downloadSvgBtn.disabled = false;
+    }
+
+    // Everything needed to draw the code, in module units (1 = one module)
+    function buildDesign(qr) {
+      const count = qr.getModuleCount();
+      const size = count + MARGIN * 2;
+      const d = {
+        size,
+        style: dotStyle.value,
+        fg: fgColor.value,
+        bg: transparent.checked ? null : bgColor.value,
+        path: modulesPath(qr, count, dotStyle.value),
+        logo: null,
+      };
+      if (logo) {
+        const box = count * logoSize.value / 100;
+        const x = (size - box) / 2;
+        // SVGs without intrinsic dimensions report 0; treat them as square
+        const lw = logo.naturalWidth || 1, lh = logo.naturalHeight || 1;
+        const scale = Math.min(box / lw, box / lh);
+        const w = lw * scale, h = lh * scale;
+        d.logo = {
+          clear: { x: x - 1, y: x - 1, size: box + 2 },  // area kept free of modules, 1 module of padding
+          img: { x: x + (box - w) / 2, y: x + (box - h) / 2, w, h },
+        };
+      }
+      return d;
+    }
+
+    const n = v => +v.toFixed(3);
+
+    // Rounded rectangle path with per-corner radii [topLeft, topRight, bottomRight, bottomLeft]
+    function roundRectPath(x, y, w, h, radii) {
+      const [tl, tr, br, bl] = typeof radii === 'number' ? [radii, radii, radii, radii] : radii;
+      const arc = (r, ex, ey) => r ? `A${n(r)} ${n(r)} 0 0 1 ${n(ex)} ${n(ey)}` : `L${n(ex)} ${n(ey)}`;
+      return `M${n(x + tl)} ${n(y)}H${n(x + w - tr)}${arc(tr, x + w, y + tr)}` +
+        `V${n(y + h - br)}${arc(br, x + w - br, y + h)}` +
+        `H${n(x + bl)}${arc(bl, x, y + h - bl)}` +
+        `V${n(y + tl)}${arc(tl, x + tl, y)}Z`;
+    }
+
+    function circlePath(cx, cy, r) {
+      return `M${n(cx - r)} ${n(cy)}a${n(r)} ${n(r)} 0 1 0 ${n(r * 2)} 0a${n(r)} ${n(r)} 0 1 0 ${n(-r * 2)} 0Z`;
+    }
+
+    // Top-left module of each 7x7 finder pattern ("eye")
+    function finderOrigins(count) {
+      return [[0, 0], [0, count - 7], [count - 7, 0]];
+    }
+
+    function inFinder(r, c, count) {
+      return finderOrigins(count).some(([fr, fc]) => r >= fr && r < fr + 7 && c >= fc && c < fc + 7);
+    }
+
+    // One path (fill-rule evenodd) covering every dark module
+    function modulesPath(qr, count, style) {
+      const dark = (r, c) => r >= 0 && c >= 0 && r < count && c < count && qr.isDark(r, c);
+      const parts = [];
+
+      for (let r = 0; r < count; r++) {
+        for (let c = 0; c < count; c++) {
+          if (!dark(r, c)) continue;
+          const x = c + MARGIN, y = r + MARGIN;
+          if (style === 'square') {
+            parts.push(`M${x} ${y}h1v1h-1Z`);
+            continue;
+          }
+          if (inFinder(r, c, count)) continue;  // eyes are drawn as whole shapes below
+          if (style === 'dots') {
+            parts.push(circlePath(x + 0.5, y + 0.5, 0.425));
+          } else {
+            // Round only the corners not joined to a neighbor, so adjacent modules merge into smooth blobs
+            const up = dark(r - 1, c), down = dark(r + 1, c), left = dark(r, c - 1), right = dark(r, c + 1);
+            parts.push(roundRectPath(x, y, 1, 1, [
+              up || left ? 0 : 0.5,
+              up || right ? 0 : 0.5,
+              down || right ? 0 : 0.5,
+              down || left ? 0 : 0.5,
+            ]));
+          }
+        }
+      }
+
+      if (style !== 'square') {
+        for (const [fr, fc] of finderOrigins(count)) {
+          const x = fc + MARGIN, y = fr + MARGIN;
+          // Outer ring (7x7 with a 5x5 hole via evenodd), then the 3x3 center
+          parts.push(roundRectPath(x, y, 7, 7, 2));
+          parts.push(roundRectPath(x + 1, y + 1, 5, 5, 1.2));
+          parts.push(roundRectPath(x + 2, y + 2, 3, 3, style === 'dots' ? 1.5 : 1));
+        }
+      }
+      return parts.join('');
+    }
+
+    function drawCanvas(d) {
+      canvas.width = canvas.height = d.size * SCALE;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(SCALE, SCALE);
+      if (d.bg) {
+        ctx.fillStyle = d.bg;
+        ctx.fillRect(0, 0, d.size, d.size);
+      }
+      ctx.fillStyle = d.fg;
+      ctx.fill(new Path2D(d.path), 'evenodd');
+      if (d.logo) {
+        const { clear, img } = d.logo;
+        ctx.clearRect(clear.x, clear.y, clear.size, clear.size);
+        if (d.bg) {
+          ctx.fillStyle = d.bg;
+          ctx.fillRect(clear.x, clear.y, clear.size, clear.size);
+        }
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(logo, img.x, img.y, img.w, img.h);
+      }
+    }
+
+    function buildSvg(d) {
+      const px = d.size * SCALE;
+      const out = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${d.size} ${d.size}" width="${px}" height="${px}"` +
+        (d.style === 'square' ? ' shape-rendering="crispEdges"' : '') + '>'];
+      if (d.bg) out.push(`<rect width="${d.size}" height="${d.size}" fill="${d.bg}"/>`);
+      let mask = '';
+      if (d.logo) {
+        // Hide the modules behind the logo with a mask so the area stays truly empty when transparent
+        const { clear } = d.logo;
+        out.push(`<mask id="logo-clear"><rect width="${d.size}" height="${d.size}" fill="#fff"/>` +
+          `<rect x="${n(clear.x)}" y="${n(clear.y)}" width="${n(clear.size)}" height="${n(clear.size)}" fill="#000"/></mask>`);
+        mask = ' mask="url(#logo-clear)"';
+      }
+      out.push(`<path d="${d.path}" fill="${d.fg}" fill-rule="evenodd"${mask}/>`);
+      if (d.logo) {
+        const { img } = d.logo;
+        out.push(`<image href="${logo.src}" x="${n(img.x)}" y="${n(img.y)}" width="${n(img.w)}" height="${n(img.h)}"/>`);
+      }
+      out.push('</svg>');
+      return out.join('');
+    }
+
+    function setLogo(img) {
+      logo = img;
+      logoSizeRow.hidden = removeLogoBtn.hidden = !img;
+      logoFile.value = '';
+      render();
+    }
+
+    function showMessage(msg) {
+      design = null;
+      preview.classList.remove('has-code');
+      preview.textContent = msg;
+      downloadPngBtn.disabled = downloadSvgBtn.disabled = true;
+    }
+
+    function download(href, ext) {
+      const a = document.createElement('a');
+      a.href = href;
+      const name = filenameInput.value.trim().replace(/\.(png|svg)$/i, '').replace(/[\\/:*?"<>|]/g, '');
+      a.download = (name || 'qrcode') + '.' + ext;
+      a.click();
+    }
+
+    downloadPngBtn.addEventListener('click', () => download(canvas.toDataURL('image/png'), 'png'));
+    downloadSvgBtn.addEventListener('click', () => {
+      const url = URL.createObjectURL(new Blob([buildSvg(design)], { type: 'image/svg+xml' }));
+      download(url, 'svg');
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    input.addEventListener('input', render);
+    document.getElementById('chooseLogo').addEventListener('click', () => logoFile.click());
+    removeLogoBtn.addEventListener('click', () => setLogo(null));
+    logoFile.addEventListener('change', () => {
+      const file = logoFile.files[0];
+      if (!file) return;
+      // Read as a data: URL so the same image can be embedded in the SVG export
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => setLogo(img);
+        img.onerror = () => { logoFile.value = ''; };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    [dotStyle, fgColor, bgColor, transparent, logoSize].forEach(el => el.addEventListener('input', render));
+    document.getElementById('reset').addEventListener('click', () => {
+      dotStyle.value = 'square';
+      fgColor.value = '#000000';
+      bgColor.value = '#ffffff';
+      transparent.checked = false;
+      logoSize.value = 20;
+      setLogo(null);
+    });
+    filenameInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !downloadPngBtn.disabled) downloadPngBtn.click(); });
+  </script>
+</body>
+</html>
